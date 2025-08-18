@@ -1,4 +1,4 @@
-// Code by Aabhas Senapati for the Desert Botanical Temperature Sensor Display Project, using Adafruit ESP32 S2 Feather TFT board with a adalogger feather wing, and op-amp circuit for thermistors.
+// Code by Aabhas Senapati for the Desert Botanical Temperature Sensor Display Project, using Adafruit ESP32 S2 Feather TFT board with a adalogger feather wing, and op-amp circuit for 10 kOhm thermistors.
 // Last Edited on 18-08-25
 // Github Project Page: https://github.com/aabhassenapati/temperature-display-logger.git
 
