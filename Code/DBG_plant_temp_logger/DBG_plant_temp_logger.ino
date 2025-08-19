@@ -1,10 +1,11 @@
 // Code by Aabhas Senapati for the Desert Botanical Temperature Sensor Display Project, using Adafruit ESP32 S2 Feather TFT board with a adalogger feather wing, and op-amp circuits for 10 kOhm thermistors.
-// Last Edited on 19-08-25 - Added combined SD Card and Google Sheets logging with 5-minute averaging every 30 seconds 
+// Last Edited on 19-08-25 - Added combined SD Card and Google Sheets logging with 5-minute averaging every 30 seconds, and turning of dispplay in the night.
 // Github Project Page: https://github.com/aabhassenapati/temperature-display-logger.git
 
 // Data recorded on sheet: https://docs.google.com/spreadsheets/d/1vcmvVcORiZuO4vOsFyO3KGQkez6GWRYInc9CoZGzT1s/edit?usp=sharing
 // Calibration data on sheet: https://docs.google.com/spreadsheets/d/1j9i1ZkVB2AnTspQb2jjDu-8glNMxmgINlzlttA89imA/edit?usp=sharing
 // Circuit Simulation on: https://tinyurl.com/27u8j87o
+
 
 // Importing required libraries for the code, install the necesarry libraries through Tools -> Manage libraries
 
@@ -318,7 +319,15 @@ double voltagetoresistancetotemp(double analogreadmv){
     //conversion for the opamp circuit to find out resistance from the output voltage. link to circuit : https://tinyurl.com/2cm8oouf
     vout = (analogreadmv-21.00)/1000;//adjusting for offset in ADC
     vn = (rn/rf)*(((1+(rf/rn))*vp)-vout);//using opamp law, vin = vn; //Volts
+    
+    // Check for division by zero
+    if ((3.3-vn) <= 0) {
+      Serial.println("Warning: Division by zero in resistance calculation");
+      return NAN;
+    }
+    
     resistance = 1000*((10.3*vn)/(3.3-vn));//kOhm //voltage divider conversion to find resistance
+    
     //applying resistance to temeprature calibration conversion using steinhart hart fit from : https://docs.google.com/spreadsheets/d/1j9i1ZkVB2AnTspQb2jjDu-8glNMxmgINlzlttA89imA/edit?usp=sharing
     double x = log(resistance);
     double term1 = -306.0;
@@ -326,10 +335,34 @@ double voltagetoresistancetotemp(double analogreadmv){
     double term3 = -31.8 * x * x;
     double term4 = 1.41 * x * x * x;
     double planttemp = term1 + term2 + term3 + term4;
+    
     return planttemp;
 }
 
-// Combined logging function with standard deviation calculation
+// Function to check if display should be off (7:30 PM to 4:30 AM)
+bool shouldDisplayBeOff() {
+  DateTime now = rtc.now();
+  int currentHour = now.hour();
+  int currentMinute = now.minute();
+  
+  // Convert current time to minutes since midnight for easier comparison
+  int currentTimeMinutes = currentHour * 60 + currentMinute;
+  
+  // 7:30 PM = 19:30 = 19*60 + 30 = 1170 minutes
+  // 4:30 AM = 4:30 = 4*60 + 30 = 270 minutes
+  int displayOffStart = 19 * 60 + 30;  // 7:30 PM
+  int displayOffEnd = 4 * 60 + 30;     // 4:30 AM
+  
+  // Check if current time is in the sleep period
+  // Since this crosses midnight, we need to handle it specially
+  if (displayOffStart > displayOffEnd) {
+    // Sleep period crosses midnight (19:30 to 04:30 next day)
+    return (currentTimeMinutes >= displayOffStart || currentTimeMinutes < displayOffEnd);
+  } else {
+    // Sleep period doesn't cross midnight (shouldn't happen with 19:30-04:30)
+    return (currentTimeMinutes >= displayOffStart && currentTimeMinutes < displayOffEnd);
+  }
+}
 void handleCombinedLogging() {
   // Take measurements every 30 seconds
   if (millis() - measurementLastTime > measurementInterval) {
@@ -600,7 +633,7 @@ void setup(){
 
   // Check for presence of the BME 280 sensor used for temperature, RH and atmospheric pressure measurements connected via I2C
   if (TB.scanI2CBus(0x77)) {
-    Serial.println("BME280 address");
+    Serial.println("BME280 address detected");
 
     unsigned status = bme.begin();  
     if (!status) {
@@ -610,10 +643,14 @@ void setup(){
       Serial.print("   ID of 0x56-0x58 represents a BMP 280,\n");
       Serial.print("        ID of 0x60 represents a BME 280.\n");
       Serial.print("        ID of 0x61 represents a BME 680.\n");
-      return;
+      bmefound = false; // Ensure it's set to false if initialization fails
+    } else {
+      Serial.println("BME280 found and initialized OK");
+      bmefound = true;
     }
-    Serial.println("BME280 found OK");
-    bmefound = true;
+  } else {
+    Serial.println("BME280 not detected on I2C bus");
+    bmefound = false;
   }
   GSheet.printf("ESP Google Sheet Client v%s\n\n", ESP_GOOGLE_SHEET_CLIENT_VERSION);
 
@@ -679,72 +716,114 @@ void loop(){
     displaylastTime = millis();
     Serial.println("**********************");
     TB.printI2CBusScan();
-    canvas.fillScreen(ST77XX_BLACK);
-    canvas.setCursor(0, 25);
-    canvas.setTextColor(ST77XX_RED);
-    canvas.print("Air Temp: ");
-    canvas.print(bme.readTemperature());
-    canvas.println(" °C");
-    canvas.setTextColor(ST77XX_GREEN); 
-    canvas.print("Plant Temp: ");
-
-    //conversion for the opamp circuit to find out resistance from the output voltage. link to circuit : https://tinyurl.com/2cm8oouf
-    double analogreadmv1 = analogReadMilliVolts(5);
-    double analogreadmv2 = analogReadMilliVolts(A1);
-    double analogreadmv3 = analogReadMilliVolts(A2);
-    double analogreadmv4 = analogReadMilliVolts(A3);
-    double analogreadmv5 = analogReadMilliVolts(A4);
-    double analogreadmv6 = analogReadMilliVolts(A5);
-
-    planttemp1 = voltagetoresistancetotemp(analogreadmv1);
-    planttemp2 = voltagetoresistancetotemp(analogreadmv2);
-    planttemp3 = voltagetoresistancetotemp(analogreadmv3);
-    planttemp4 = voltagetoresistancetotemp(analogreadmv4);
-    planttemp5 = voltagetoresistancetotemp(analogreadmv5);
-    planttemp6 = voltagetoresistancetotemp(analogreadmv6);
-    canvas.print(planttemp1,1); 
-    canvas.println(" °C"); 
-    canvas.setTextColor(ST77XX_YELLOW);
-    // canvas.print("Rel. Humidity: ");
-    // canvas.print(bme.readHumidity());
-    // canvas.println(" %");
-    canvas.print("Battery: ");
-    canvas.setTextColor(ST77XX_WHITE);
-    if (lcfound == true) {
-      canvas.print(lc_bat.cellVoltage(), 1);
-      canvas.print(" V  /  ");
-      canvas.print(lc_bat.cellPercent(), 0);
-      canvas.println("%");
-    }
-    else {
-      canvas.print(max_bat.cellVoltage(), 1);
-      canvas.print(" V  /  ");
-      canvas.print(max_bat.cellPercent(), 0);
-      canvas.println("%");
-    }
-    canvas.setTextColor(ST77XX_BLUE); 
-    canvas.print("I2C: ");
-    canvas.setTextColor(ST77XX_WHITE);
-    for (uint8_t a=0x01; a<=0x7F; a++) {
-      if (TB.scanI2CBus(a, 0))  {
-        canvas.print("0x");
-        canvas.print(a, HEX);
-        canvas.print(", ");
+    
+    // Check if display should be off (7:30 PM to 4:30 AM)
+    bool displayShouldBeOff = shouldDisplayBeOff();
+    
+    if (displayShouldBeOff) {
+      // Turn off display backlight and clear screen
+      pinMode(TFT_BACKLITE, OUTPUT);
+      digitalWrite(TFT_BACKLITE, LOW);
+      canvas.fillScreen(ST77XX_BLACK);
+      display.drawRGBBitmap(0, 0, canvas.getBuffer(), 240, 135);
+      Serial.println("Display OFF - Sleep hours (7:30 PM - 4:30 AM)");
+    } else {
+      // Normal display operation
+      canvas.fillScreen(ST77XX_BLACK);
+      canvas.setCursor(0, 25);
+      canvas.setTextColor(ST77XX_RED);
+      canvas.print("Air Temp: ");
+      if (bmefound) {
+        float tempReading = bme.readTemperature();
+        if (!isnan(tempReading)) {
+          canvas.print(tempReading, 1);
+        } else {
+          canvas.print("ERR");
+        }
+      } else {
+        canvas.print("N/A");
       }
+      canvas.println(" °C");
+      canvas.setTextColor(ST77XX_GREEN); 
+      canvas.print("Plant Temp: ");
+
+      //conversion for the opamp circuit to find out resistance from the output voltage. link to circuit : https://tinyurl.com/2cm8oouf
+      double analogreadmv1 = analogReadMilliVolts(5);
+      double analogreadmv2 = analogReadMilliVolts(A1);
+      double analogreadmv3 = analogReadMilliVolts(A2);
+      double analogreadmv4 = analogReadMilliVolts(A3);
+      double analogreadmv5 = analogReadMilliVolts(A4);
+      double analogreadmv6 = analogReadMilliVolts(A5);
+
+      planttemp1 = voltagetoresistancetotemp(analogreadmv1);
+      planttemp2 = voltagetoresistancetotemp(analogreadmv2);
+      planttemp3 = voltagetoresistancetotemp(analogreadmv3);
+      planttemp4 = voltagetoresistancetotemp(analogreadmv4);
+      planttemp5 = voltagetoresistancetotemp(analogreadmv5);
+      planttemp6 = voltagetoresistancetotemp(analogreadmv6);
+      
+      canvas.print(planttemp1,1); 
+      canvas.println(" °C"); 
+      canvas.setTextColor(ST77XX_YELLOW);
+      // canvas.print("Rel. Humidity: ");
+      // canvas.print(bme.readHumidity());
+      // canvas.println(" %");
+      canvas.print("Battery: ");
+      canvas.setTextColor(ST77XX_WHITE);
+      if (lcfound == true) {
+        canvas.print(lc_bat.cellVoltage(), 1);
+        canvas.print(" V  /  ");
+        canvas.print(lc_bat.cellPercent(), 0);
+        canvas.println("%");
+      }
+      else {
+        canvas.print(max_bat.cellVoltage(), 1);
+        canvas.print(" V  /  ");
+        canvas.print(max_bat.cellPercent(), 0);
+        canvas.println("%");
+      }
+      canvas.setTextColor(ST77XX_BLUE); 
+      canvas.print("I2C: ");
+      canvas.setTextColor(ST77XX_WHITE);
+      for (uint8_t a=0x01; a<=0x7F; a++) {
+        if (TB.scanI2CBus(a, 0))  {
+          canvas.print("0x");
+          canvas.print(a, HEX);
+          canvas.print(", ");
+        }
+      }
+      
+      // Add SD card status indicator to display
+      canvas.setTextColor(ST77XX_CYAN);
+      canvas.print("SD: ");
+      canvas.setTextColor(sdCardAvailable ? ST77XX_GREEN : ST77XX_RED);
+      canvas.println(sdCardAvailable ? "OK" : "FAIL");
+      
+      display.drawRGBBitmap(0, 0, canvas.getBuffer(), 240, 135);
+      pinMode(TFT_BACKLITE, OUTPUT);
+      digitalWrite(TFT_BACKLITE, HIGH);
     }
     
-    // Add SD card status indicator to display
-    canvas.setTextColor(ST77XX_CYAN);
-    canvas.print("SD: ");
-    canvas.setTextColor(sdCardAvailable ? ST77XX_GREEN : ST77XX_RED);
-    canvas.println(sdCardAvailable ? "OK" : "FAIL");
-    
-    display.drawRGBBitmap(0, 0, canvas.getBuffer(), 240, 135);
-    pinMode(TFT_BACKLITE, OUTPUT);
-    digitalWrite(TFT_BACKLITE, HIGH);
+    // Always read thermistor values even when display is off (needed for logging)
+    if (displayShouldBeOff) {
+      // Read thermistor values even when display is off for logging purposes
+      double analogreadmv1 = analogReadMilliVolts(5);
+      double analogreadmv2 = analogReadMilliVolts(A1);
+      double analogreadmv3 = analogReadMilliVolts(A2);
+      double analogreadmv4 = analogReadMilliVolts(A3);
+      double analogreadmv5 = analogReadMilliVolts(A4);
+      double analogreadmv6 = analogReadMilliVolts(A5);
+
+      planttemp1 = voltagetoresistancetotemp(analogreadmv1);
+      planttemp2 = voltagetoresistancetotemp(analogreadmv2);
+      planttemp3 = voltagetoresistancetotemp(analogreadmv3);
+      planttemp4 = voltagetoresistancetotemp(analogreadmv4);
+      planttemp5 = voltagetoresistancetotemp(analogreadmv5);
+      planttemp6 = voltagetoresistancetotemp(analogreadmv6);
+    }
   }
 
-  // Handle combined logging onto google sheets and sd card
+  // Handle combined logging with standard deviation calculation
   handleCombinedLogging();
 
   return;
