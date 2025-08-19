@@ -1,11 +1,10 @@
 // Code by Aabhas Senapati for the Desert Botanical Temperature Sensor Display Project, using Adafruit ESP32 S2 Feather TFT board with a adalogger feather wing, and op-amp circuits for 10 kOhm thermistors.
-// Last Edited on 18-08-25
+// Last Edited on 19-08-25 - Added combined SD Card and Google Sheets logging with 5-minute averaging every 30 seconds 
 // Github Project Page: https://github.com/aabhassenapati/temperature-display-logger.git
 
 // Data recorded on sheet: https://docs.google.com/spreadsheets/d/1vcmvVcORiZuO4vOsFyO3KGQkez6GWRYInc9CoZGzT1s/edit?usp=sharing
 // Calibration data on sheet: https://docs.google.com/spreadsheets/d/1j9i1ZkVB2AnTspQb2jjDu-8glNMxmgINlzlttA89imA/edit?usp=sharing
 // Circuit Simulation on: https://tinyurl.com/27u8j87o
-
 
 // Importing required libraries for the code, install the necesarry libraries through Tools -> Manage libraries
 
@@ -21,10 +20,16 @@
 #include <Adafruit_ST7789.h> 
 #include <Fonts/FreeSans12pt7b.h>
 #include "RTClib.h"
+#include <SPI.h>
+#include <SD.h>
+#include <math.h>
 
 // For SD/SD_MMC mounting helper
 //#include <GS_SDHelper.h>
 
+// SD Card pin - Updated for ESP32-S2 TFT Feather with Adalogger FeatherWing
+// Based on ESP32 library documentation, ESP32-S2 uses GPIO34 as default CS pin
+#define SD_CS_PIN 34  // ESP32-S2 default CS pin for SD card
 
 // Instantiating objects for the required functions and libraries
 RTC_PCF8523 rtc;
@@ -35,8 +40,6 @@ Adafruit_LC709203F lc_bat;
 Adafruit_MAX17048 max_bat;
 Adafruit_ST7789 display = Adafruit_ST7789(TFT_CS, TFT_DC, TFT_RST);
 GFXcanvas16 canvas(240, 135);
-
-
 
 //Declaring variables
   double rf = 11; //kOhm
@@ -69,11 +72,47 @@ const char PRIVATE_KEY[] PROGMEM = "";
 // The ID of the spreadsheet where you'll publish the data
 const char spreadsheetId[] = "";
 
-// Timer variables
-unsigned int sheetlastTime = 0;  
-unsigned int sheettimerDelay = 30000; // time for updating a new value to the sheet, currently set to 30 seconds to record a new value.
+// Timer variables for display
 unsigned int displaylastTime = 0;  
 unsigned int displaytimerDelay = 100; // real-display display update time .1 seconds.
+
+// Combined logging system variables
+unsigned int measurementLastTime = 0;  
+unsigned int measurementInterval = 30000; // Measure every 30 seconds
+unsigned int logLastTime = 0;  
+unsigned int logInterval = 300000; // Log every 5 minutes (300,000 ms)
+
+// Averaging variables (shared for both logging systems)
+const int MEASUREMENTS_PER_LOG = 10; // 5 minutes / 30 seconds = 10 measurements
+int measurementCount = 0;
+
+// Arrays to store individual measurements for standard deviation calculation
+double airtempMeasurements[10];
+double relhumMeasurements[10];
+double atmpresMeasurements[10];
+double planttemp1Measurements[10];
+double planttemp2Measurements[10];
+double planttemp3Measurements[10];
+double planttemp4Measurements[10];
+double planttemp5Measurements[10];
+double planttemp6Measurements[10];
+double batteryVoltageMeasurements[10];
+
+// Sum variables for averaging (shared for both logging systems)
+double airtempSum = 0;
+double relhumSum = 0;
+double atmpresSum = 0;
+double planttemp1Sum = 0;
+double planttemp2Sum = 0;
+double planttemp3Sum = 0;
+double planttemp4Sum = 0;
+double planttemp5Sum = 0;
+double planttemp6Sum = 0;
+double batteryVoltageSum = 0;
+
+// SD Card configuration
+String dataFileName = "datalog.csv";
+bool sdCardAvailable = false;
 
 // Token Callback function
 void tokenStatusCallback(TokenInfo info);
@@ -95,6 +134,21 @@ unsigned long lastWifiAttemptMillis = 0;
 const long wifiReconnectInterval = 10000; // Try reconnecting every 10 seconds
 bool internetConnected = false;
 bool internetReConnected = false;
+
+// Function to calculate standard deviation
+double calculateStandardDeviation(double measurements[], int count, double mean) {
+  if (count <= 1) return 0.0;
+  
+  double sumSquaredDifferences = 0.0;
+  for (int i = 0; i < count; i++) {
+    double difference = measurements[i] - mean;
+    sumSquaredDifferences += difference * difference;
+  }
+  
+  // Calculate sample standard deviation (n-1 in denominator)
+  double variance = sumSquaredDifferences / (count - 1);
+  return sqrt(variance);
+}
 
 // Function to connect to Wifi
 void connectToWiFi() {
@@ -154,6 +208,103 @@ void tokenStatusCallback(TokenInfo info){
     }
 }
 
+// Function to initialize SD card
+bool initializeSDCard() {
+  Serial.print("Initializing SD card...");
+  
+  if (!SD.begin(SD_CS_PIN)) {
+    Serial.println("SD card initialization failed!");
+    Serial.print("Tried CS pin: ");
+    Serial.println(SD_CS_PIN);
+    Serial.println("ESP32-S2 should use GPIO34 for CS pin with Adalogger FeatherWing");
+    return false;
+  }
+  Serial.println("SD card initialized successfully.");
+  Serial.print("Using CS pin: ");
+  Serial.println(SD_CS_PIN);
+  
+  // Check if header needs to be written
+  if (!SD.exists(dataFileName)) {
+    File dataFile = SD.open(dataFileName, FILE_WRITE);
+    if (dataFile) {
+      // Updated CSV header to include standard deviations
+      dataFile.println("Timestamp,AirTemp_C,AirTemp_StdDev,Humidity_%,Humidity_StdDev,Pressure_hPa,Pressure_StdDev,PlantTemp1_C,PlantTemp1_StdDev,PlantTemp2_C,PlantTemp2_StdDev,PlantTemp3_C,PlantTemp3_StdDev,PlantTemp4_C,PlantTemp4_StdDev,PlantTemp5_C,PlantTemp5_StdDev,PlantTemp6_C,PlantTemp6_StdDev,BatteryVoltage_V,BatteryVoltage_StdDev");
+      dataFile.close();
+      Serial.println("CSV header written to SD card with standard deviation columns.");
+    } else {
+      Serial.println("Error creating data file!");
+      return false;
+    }
+  }
+  
+  return true;
+}
+
+// Function to log data to SD card with standard deviations
+bool logToSDCard(DateTime timestamp, double avgAirtemp, double stdAirtemp, double avgRelhum, double stdRelhum, 
+                 double avgAtmpres, double stdAtmpres, double avgPlanttemp1, double stdPlanttemp1, 
+                 double avgPlanttemp2, double stdPlanttemp2, double avgPlanttemp3, double stdPlanttemp3, 
+                 double avgPlanttemp4, double stdPlanttemp4, double avgPlanttemp5, double stdPlanttemp5, 
+                 double avgPlanttemp6, double stdPlanttemp6, double avgBatteryVoltage, double stdBatteryVoltage) {
+  
+  if (!sdCardAvailable) return false;
+  
+  File dataFile = SD.open(dataFileName, FILE_WRITE);
+  
+  if (dataFile) {
+    // Write averaged data and standard deviations to SD card in CSV format
+    dataFile.print(timestamp.unixtime());
+    dataFile.print(",");
+    dataFile.print(avgAirtemp, 2);
+    dataFile.print(",");
+    dataFile.print(stdAirtemp, 3);
+    dataFile.print(",");
+    dataFile.print(avgRelhum, 2);
+    dataFile.print(",");
+    dataFile.print(stdRelhum, 3);
+    dataFile.print(",");
+    dataFile.print(avgAtmpres, 2);
+    dataFile.print(",");
+    dataFile.print(stdAtmpres, 3);
+    dataFile.print(",");
+    dataFile.print(avgPlanttemp1, 2);
+    dataFile.print(",");
+    dataFile.print(stdPlanttemp1, 3);
+    dataFile.print(",");
+    dataFile.print(avgPlanttemp2, 2);
+    dataFile.print(",");
+    dataFile.print(stdPlanttemp2, 3);
+    dataFile.print(",");
+    dataFile.print(avgPlanttemp3, 2);
+    dataFile.print(",");
+    dataFile.print(stdPlanttemp3, 3);
+    dataFile.print(",");
+    dataFile.print(avgPlanttemp4, 2);
+    dataFile.print(",");
+    dataFile.print(stdPlanttemp4, 3);
+    dataFile.print(",");
+    dataFile.print(avgPlanttemp5, 2);
+    dataFile.print(",");
+    dataFile.print(stdPlanttemp5, 3);
+    dataFile.print(",");
+    dataFile.print(avgPlanttemp6, 2);
+    dataFile.print(",");
+    dataFile.print(stdPlanttemp6, 3);
+    dataFile.print(",");
+    dataFile.print(avgBatteryVoltage, 3);
+    dataFile.print(",");
+    dataFile.println(stdBatteryVoltage, 4);
+    
+    dataFile.close();
+    
+    Serial.println("✓ Data logged to SD card successfully (with standard deviations)");
+    return true;
+  } else {
+    Serial.println("✗ Error opening SD card file for writing!");
+    return false;
+  }
+}
+
 // Function to convert voltage readings on a ADC channel into temperature values, by converting from voltage to resistance using opamp-circuit and corresponsing conversions, and then applying resistnace to temperature calibration to obtain temperature.
 double voltagetoresistancetotemp(double analogreadmv){
   //Declaring internal variables based on the thermistor circuit.
@@ -178,6 +329,218 @@ double voltagetoresistancetotemp(double analogreadmv){
     return planttemp;
 }
 
+// Combined logging function with standard deviation calculation
+void handleCombinedLogging() {
+  // Take measurements every 30 seconds
+  if (millis() - measurementLastTime > measurementInterval) {
+    measurementLastTime = millis();
+    
+    // Take new sensor readings
+    double currentAirtemp = bme.readTemperature();
+    double currentRelhum = bme.readHumidity();
+    double currentAtmpres = bme.readPressure()/100.0;
+    double currentBatteryVoltage;
+    
+    // Get battery voltage from the appropriate sensor
+    if (lcfound) {
+      currentBatteryVoltage = lc_bat.cellVoltage();
+    } else {
+      currentBatteryVoltage = max_bat.cellVoltage();
+    }
+    
+    // Store individual measurements in arrays for standard deviation calculation
+    if (measurementCount < MEASUREMENTS_PER_LOG) {
+      airtempMeasurements[measurementCount] = currentAirtemp;
+      relhumMeasurements[measurementCount] = currentRelhum;
+      atmpresMeasurements[measurementCount] = currentAtmpres;
+      planttemp1Measurements[measurementCount] = planttemp1;  // These are updated in display loop
+      planttemp2Measurements[measurementCount] = planttemp2;
+      planttemp3Measurements[measurementCount] = planttemp3;
+      planttemp4Measurements[measurementCount] = planttemp4;
+      planttemp5Measurements[measurementCount] = planttemp5;
+      planttemp6Measurements[measurementCount] = planttemp6;
+      batteryVoltageMeasurements[measurementCount] = currentBatteryVoltage;
+    }
+    
+    // Add to running sums
+    airtempSum += currentAirtemp;
+    relhumSum += currentRelhum;
+    atmpresSum += currentAtmpres;
+    planttemp1Sum += planttemp1;
+    planttemp2Sum += planttemp2;
+    planttemp3Sum += planttemp3;
+    planttemp4Sum += planttemp4;
+    planttemp5Sum += planttemp5;
+    planttemp6Sum += planttemp6;
+    batteryVoltageSum += currentBatteryVoltage;
+    
+    measurementCount++;
+    
+    Serial.print("Measurement ");
+    Serial.print(measurementCount);
+    Serial.print("/");
+    Serial.print(MEASUREMENTS_PER_LOG);
+    Serial.print(" - Temp: ");
+    Serial.print(currentAirtemp);
+    Serial.print("°C, Humidity: ");
+    Serial.print(currentRelhum);
+    Serial.println("%");
+  }
+  
+  // Log averaged values every 5 minutes to both systems
+  if (measurementCount >= MEASUREMENTS_PER_LOG && (millis() - logLastTime > logInterval)) {
+    logLastTime = millis();
+    
+    // Calculate averages
+    double avgAirtemp = airtempSum / measurementCount;
+    double avgRelhum = relhumSum / measurementCount;
+    double avgAtmpres = atmpresSum / measurementCount;
+    double avgPlanttemp1 = planttemp1Sum / measurementCount;
+    double avgPlanttemp2 = planttemp2Sum / measurementCount;
+    double avgPlanttemp3 = planttemp3Sum / measurementCount;
+    double avgPlanttemp4 = planttemp4Sum / measurementCount;
+    double avgPlanttemp5 = planttemp5Sum / measurementCount;
+    double avgPlanttemp6 = planttemp6Sum / measurementCount;
+    double avgBatteryVoltage = batteryVoltageSum / measurementCount;
+    
+    // Calculate standard deviations
+    double stdAirtemp = calculateStandardDeviation(airtempMeasurements, measurementCount, avgAirtemp);
+    double stdRelhum = calculateStandardDeviation(relhumMeasurements, measurementCount, avgRelhum);
+    double stdAtmpres = calculateStandardDeviation(atmpresMeasurements, measurementCount, avgAtmpres);
+    double stdPlanttemp1 = calculateStandardDeviation(planttemp1Measurements, measurementCount, avgPlanttemp1);
+    double stdPlanttemp2 = calculateStandardDeviation(planttemp2Measurements, measurementCount, avgPlanttemp2);
+    double stdPlanttemp3 = calculateStandardDeviation(planttemp3Measurements, measurementCount, avgPlanttemp3);
+    double stdPlanttemp4 = calculateStandardDeviation(planttemp4Measurements, measurementCount, avgPlanttemp4);
+    double stdPlanttemp5 = calculateStandardDeviation(planttemp5Measurements, measurementCount, avgPlanttemp5);
+    double stdPlanttemp6 = calculateStandardDeviation(planttemp6Measurements, measurementCount, avgPlanttemp6);
+    double stdBatteryVoltage = calculateStandardDeviation(batteryVoltageMeasurements, measurementCount, avgBatteryVoltage);
+    
+    // Get timestamp
+    DateTime now = rtc.now();
+    
+    Serial.println("\n==============================");
+    Serial.println("LOGGING 5-MINUTE AVERAGES WITH STANDARD DEVIATIONS");
+    Serial.print("Measurements averaged: ");
+    Serial.println(measurementCount);
+    Serial.print("Air Temp: ");
+    Serial.print(avgAirtemp, 2);
+    Serial.print(" ± ");
+    Serial.print(stdAirtemp, 3);
+    Serial.println("°C");
+    Serial.print("Humidity: ");
+    Serial.print(avgRelhum, 2);
+    Serial.print(" ± ");
+    Serial.print(stdRelhum, 3);
+    Serial.println("%");
+    Serial.println("==============================");
+    
+    // Attempt to log to both systems
+    bool googleSheetsSuccess = false;
+    bool sdCardSuccess = false;
+    
+    // 1. Try Google Sheets logging (if internet connected)
+    if (internetConnected) {
+      bool ready = GSheet.ready();
+      if (ready) {
+        FirebaseJson response;
+        FirebaseJson valueRange;
+
+        // Set up the values for Google Sheets (keeping original format for compatibility)
+        airtemp = avgAirtemp;
+        relhum = avgRelhum;
+        atmpres = avgAtmpres;
+
+        valueRange.add("majorDimension", "COLUMNS");
+        valueRange.set("values/[0]/[0]", now.unixtime());
+        valueRange.set("values/[1]/[0]", avgAirtemp);
+        valueRange.set("values/[2]/[0]", avgRelhum);
+        valueRange.set("values/[3]/[0]", avgAtmpres);
+        valueRange.set("values/[4]/[0]", avgPlanttemp1);
+        valueRange.set("values/[5]/[0]", avgPlanttemp2);
+        valueRange.set("values/[6]/[0]", avgPlanttemp3);
+        valueRange.set("values/[7]/[0]", avgPlanttemp4);
+        valueRange.set("values/[8]/[0]", avgPlanttemp5);
+        valueRange.set("values/[9]/[0]", avgPlanttemp6);
+        valueRange.set("values/[10]/[0]", avgBatteryVoltage);
+        // Add standard deviations to Google Sheets
+        valueRange.set("values/[11]/[0]", stdAirtemp);
+        valueRange.set("values/[12]/[0]", stdRelhum);
+        valueRange.set("values/[13]/[0]", stdAtmpres);
+        valueRange.set("values/[14]/[0]", stdPlanttemp1);
+        valueRange.set("values/[15]/[0]", stdPlanttemp2);
+        valueRange.set("values/[16]/[0]", stdPlanttemp3);
+        valueRange.set("values/[17]/[0]", stdPlanttemp4);
+        valueRange.set("values/[18]/[0]", stdPlanttemp5);
+        valueRange.set("values/[19]/[0]", stdPlanttemp6);
+        valueRange.set("values/[20]/[0]", stdBatteryVoltage);
+
+        // Append values to Google Sheets
+        bool success = GSheet.values.append(&response, spreadsheetId, "Data_raw_new!A1", &valueRange);
+        if (success) {
+          response.toString(Serial, true);
+          valueRange.clear();
+          googleSheetsSuccess = true;
+          Serial.println("✓ Data logged to Google Sheets successfully (with standard deviations)");
+        } else {
+          Serial.print("✗ Google Sheets error: ");
+          Serial.println(GSheet.errorReason());
+        }
+        
+        internetConnected = checkInternetConnection();
+      } else {
+        Serial.println("✗ Google Sheets not ready");
+      }
+    } else {
+      Serial.println("⚠ No internet connection - skipping Google Sheets");
+    }
+    
+    // 2. Try SD Card logging with standard deviations
+    sdCardSuccess = logToSDCard(now, avgAirtemp, stdAirtemp, avgRelhum, stdRelhum, avgAtmpres, stdAtmpres, 
+                               avgPlanttemp1, stdPlanttemp1, avgPlanttemp2, stdPlanttemp2, avgPlanttemp3, stdPlanttemp3,
+                               avgPlanttemp4, stdPlanttemp4, avgPlanttemp5, stdPlanttemp5, avgPlanttemp6, stdPlanttemp6, 
+                               avgBatteryVoltage, stdBatteryVoltage);
+    
+    // Summary of logging results
+    Serial.println("------------------------------");
+    Serial.print("Google Sheets: ");
+    Serial.println(googleSheetsSuccess ? "SUCCESS" : "FAILED");
+    Serial.print("SD Card: ");
+    Serial.println(sdCardSuccess ? "SUCCESS" : "FAILED");
+    Serial.println("==============================\n");
+    
+    // Always reset everything regardless of logging success (skip failed datapoints)
+    airtempSum = 0;
+    relhumSum = 0;
+    atmpresSum = 0;
+    planttemp1Sum = 0;
+    planttemp2Sum = 0;
+    planttemp3Sum = 0;
+    planttemp4Sum = 0;
+    planttemp5Sum = 0;
+    planttemp6Sum = 0;
+    batteryVoltageSum = 0;
+    measurementCount = 0;
+    
+    // Clear measurement arrays
+    memset(airtempMeasurements, 0, sizeof(airtempMeasurements));
+    memset(relhumMeasurements, 0, sizeof(relhumMeasurements));
+    memset(atmpresMeasurements, 0, sizeof(atmpresMeasurements));
+    memset(planttemp1Measurements, 0, sizeof(planttemp1Measurements));
+    memset(planttemp2Measurements, 0, sizeof(planttemp2Measurements));
+    memset(planttemp3Measurements, 0, sizeof(planttemp3Measurements));
+    memset(planttemp4Measurements, 0, sizeof(planttemp4Measurements));
+    memset(planttemp5Measurements, 0, sizeof(planttemp5Measurements));
+    memset(planttemp6Measurements, 0, sizeof(planttemp6Measurements));
+    memset(batteryVoltageMeasurements, 0, sizeof(batteryVoltageMeasurements));
+    
+    if (!googleSheetsSuccess && !sdCardSuccess) {
+      Serial.println("⚠ Both logging methods failed - datapoint skipped");
+    }
+    
+    Serial.println(ESP.getFreeHeap());
+  }
+}
+
 // Setup function that initializes the different peripheral and pins used by the microcontroller.
 void setup(){
     // Initalize Serial communication
@@ -192,24 +555,31 @@ void setup(){
     rtc.begin();
     rtc.start();
 
-    //Input Pins for Thermistors, check out the pinout on https://learn.adafruit.com/adafruit-esp32-s2-tft-feather/pinouts
-    pinMode(5, INPUT);
-    pinMode(A1, INPUT);
-    pinMode(A2, INPUT);
-    pinMode(A3, INPUT);
-    pinMode(A4, INPUT);
-    pinMode(A5, INPUT);
+  //Input Pins for Thermistors, check out the pinout on https://learn.adafruit.com/adafruit-esp32-s2-tft-feather/pinouts
+  pinMode(5, INPUT);
+  pinMode(A1, INPUT);
+  pinMode(A2, INPUT);
+  pinMode(A3, INPUT);
+  pinMode(A4, INPUT);
+  pinMode(A5, INPUT);
 
+  // Initialize SD card with improved error handling
+  Serial.println("Attempting to initialize SD card...");
+  sdCardAvailable = initializeSDCard();
+  if (!sdCardAvailable) {
+    Serial.println("SD card not available - will only use Google Sheets logging");
+    Serial.println("Check SD card connection and ensure it's properly formatted");
+  }
 
-    // Initalize the LCD display
-    TB.begin();
-    display.init(135, 240);// Init ST7789 240x135
-    display.setRotation(3);
-    canvas.setFont(&FreeSans12pt7b);
-    canvas.setTextColor(ST77XX_WHITE); 
+  // Initalize the LCD display
+  TB.begin();
+  display.init(135, 240);// Init ST7789 240x135
+  display.setRotation(3);
+  canvas.setFont(&FreeSans12pt7b);
+  canvas.setTextColor(ST77XX_WHITE); 
 
-   // Check for the battery status monitoring  IC
-   if (lc_bat.begin()) {
+  // Check for the battery status monitoring IC
+  if (lc_bat.begin()) {
     Serial.println("Found LC709203F");
     Serial.print("Version: 0x"); Serial.println(lc_bat.getICversion(), HEX);
     lc_bat.setPackSize(LC709203F_APA_500MAH);
@@ -245,28 +615,54 @@ void setup(){
     Serial.println("BME280 found OK");
     bmefound = true;
   }
-    GSheet.printf("ESP Google Sheet Client v%s\n\n", ESP_GOOGLE_SHEET_CLIENT_VERSION);
+  GSheet.printf("ESP Google Sheet Client v%s\n\n", ESP_GOOGLE_SHEET_CLIENT_VERSION);
 
-    // Initiate Connection to Wi-Fi
-    WiFi.setAutoReconnect(true);
-    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  // Initiate Connection to Wi-Fi
+  WiFi.setAutoReconnect(true);
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+
+  Serial.print("Connecting to Wi-Fi");
+  //Wait 60 seconds after resetting the board to connect to Wifi.
+  while ((WiFi.status() != WL_CONNECTED)&&(millis()<=60000))  {
+    Serial.print(".");
+    delay(1000);
+  }
+  Serial.println();
+  Serial.print("Connected with IP: ");
+  Serial.println(WiFi.localIP());
+  Serial.println();
+
+  // Checks Internet Connection
+  internetConnected = checkInternetConnection();
   
-    Serial.print("Connecting to Wi-Fi");
-    //Wait 60 seconds after resetting the board to connect to Wifi.
-    while ((WiFi.status() != WL_CONNECTED)&&(millis()<=60000))  {
-      Serial.print(".");
-      delay(1000);
+  // Initiates the Google Sheets logging
+  // Set the callback for Google API access token generation status (for debug only)
+  GSheet.setTokenCallback(tokenStatusCallback);
+
+  // Set the seconds to refresh the auth token before expire (60 to 3540, default is 300 seconds)
+  GSheet.setPrerefreshSeconds(10 * 60);
+
+  // Begin the access token generation for Google API authentication
+  GSheet.begin(CLIENT_EMAIL, PROJECT_ID, PRIVATE_KEY);
+}
+
+// Main program that is executed over time
+void loop(){
+
+  // Checks Wifi and Internet Connection, and determines if signal was lost before and if gsheets authentication needs to be run again.
+  checkWifiConnection();
+  if(!internetConnected){
+    internetConnected = checkInternetConnection(); //Check internet connection
+    if(internetConnected){
+      internetReConnected = true;
     }
-    Serial.println();
-    Serial.print("Connected with IP: ");
-    Serial.println(WiFi.localIP());
-    Serial.println();
-
-    // Checks Internet Connection
-    internetConnected = checkInternetConnection();
-    
-    // Initiates the Google Sheets logging
-
+    else
+    {
+      internetReConnected = false;
+    }
+  }
+  if(internetReConnected)
+  {
     // Set the callback for Google API access token generation status (for debug only)
     GSheet.setTokenCallback(tokenStatusCallback);
 
@@ -275,37 +671,11 @@ void setup(){
 
     // Begin the access token generation for Google API authentication
     GSheet.begin(CLIENT_EMAIL, PROJECT_ID, PRIVATE_KEY);
-}
+    internetReConnected = false; // Reset the flag after handling reconnection
+  }
 
-// Main program that is executed over time
-void loop(){
-
-    // Checks Wifi and Internet Connection, and determines if signal was lost before and if gsheets authentication needs to be run again.
-    checkWifiConnection();
-    if(!internetConnected){
-      internetConnected = checkInternetConnection(); //Check internet connection
-      if(internetConnected){
-        internetReConnected = true;
-      }
-      else
-      {
-        internetReConnected = false;
-      }
-    }
-    if(internetReConnected)
-    {
-          // Set the callback for Google API access token generation status (for debug only)
-    GSheet.setTokenCallback(tokenStatusCallback);
-
-    // Set the seconds to refresh the auth token before expire (60 to 3540, default is 300 seconds)
-    GSheet.setPrerefreshSeconds(10 * 60);
-
-    // Begin the access token generation for Google API authentication
-    GSheet.begin(CLIENT_EMAIL, PROJECT_ID, PRIVATE_KEY);
-    }
-
-    //This codechunk below looks for the sensor values every .1 seconds and updates it to the display in real-time
-    if ((millis() - displaylastTime > displaytimerDelay)) {
+  //This codechunk below looks for the sensor values every .1 seconds and updates it to the display in real-time
+  if ((millis() - displaylastTime > displaytimerDelay)) {
     displaylastTime = millis();
     Serial.println("**********************");
     TB.printI2CBusScan();
@@ -362,62 +732,20 @@ void loop(){
         canvas.print(", ");
       }
     }
+    
+    // Add SD card status indicator to display
+    canvas.setTextColor(ST77XX_CYAN);
+    canvas.print("SD: ");
+    canvas.setTextColor(sdCardAvailable ? ST77XX_GREEN : ST77XX_RED);
+    canvas.println(sdCardAvailable ? "OK" : "FAIL");
+    
     display.drawRGBBitmap(0, 0, canvas.getBuffer(), 240, 135);
     pinMode(TFT_BACKLITE, OUTPUT);
     digitalWrite(TFT_BACKLITE, HIGH);
   }
 
-  // This code chunk below looks for internet connection, and then updates the current reading to google sheets every 30 seconds, if connection is lost, it does not log those datapoints on gsheets.
-  if(internetConnected){
-  bool ready = GSheet.ready(); // Call ready() repeatedly in loop for authentication checking and processing
-    if ((ready && (millis() - sheetlastTime > sheettimerDelay))){
-        sheetlastTime = millis();
-
-        FirebaseJson response;
-
-        Serial.println("\nAppend spreadsheet values...");
-        Serial.println("----------------------------");
-
-        FirebaseJson valueRange;
-
-        // New BME280 sensor readings
-        airtemp = bme.readTemperature();
-        //temp = 1.8*bme.readTemperature() + 32;
-        relhum = bme.readHumidity();
-        atmpres = bme.readPressure()/100.0F;
-        // Get timestamp
-        DateTime now = rtc.now();
-
-        valueRange.add("majorDimension", "COLUMNS");
-        valueRange.set("values/[0]/[0]", now.unixtime());
-        valueRange.set("values/[1]/[0]", airtemp);
-        valueRange.set("values/[2]/[0]", relhum);
-        valueRange.set("values/[3]/[0]", atmpres);
-        valueRange.set("values/[4]/[0]", planttemp1);
-        valueRange.set("values/[5]/[0]", planttemp2);
-        valueRange.set("values/[6]/[0]", planttemp3);
-        valueRange.set("values/[7]/[0]", planttemp4);
-        valueRange.set("values/[8]/[0]", planttemp5);
-        valueRange.set("values/[9]/[0]", planttemp6);
-        valueRange.set("values/[10]/[0]", max_bat.cellVoltage());
-        
-
-
-        // For Google Sheet API ref doc, go to https://developers.google.com/sheets/api/reference/rest/v4/spreadsheets.values/append
-        // Append values to the spreadsheet, on the sheet specfied in the line below
-        bool success = GSheet.values.append(&response /* returned response */, spreadsheetId /* spreadsheet Id to append */, "Data_raw_new!A1" /* range to append */, &valueRange /* data range to append */);
-        if (success){
-            response.toString(Serial, true);
-            valueRange.clear();
-        }
-        else{
-            Serial.println(GSheet.errorReason());
-        }
-        Serial.println();
-        Serial.println(ESP.getFreeHeap());
-        internetConnected = checkInternetConnection();
-    }
-  }
+  // Handle combined logging onto google sheets and sd card
+  handleCombinedLogging();
 
   return;
 }
