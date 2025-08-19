@@ -404,8 +404,8 @@ void loop(){
 
 
         // For Google Sheet API ref doc, go to https://developers.google.com/sheets/api/reference/rest/v4/spreadsheets.values/append
-        // Append values to the spreadsheet
-        bool success = GSheet.values.append(&response /* returned response */, spreadsheetId /* spreadsheet Id to append */, "Sheet1!A1" /* range to append */, &valueRange /* data range to append */);
+        // Append values to the spreadsheet, on the sheet specfied in the line below
+        bool success = GSheet.values.append(&response /* returned response */, spreadsheetId /* spreadsheet Id to append */, "Data_raw_new!A1" /* range to append */, &valueRange /* data range to append */);
         if (success){
             response.toString(Serial, true);
             valueRange.clear();
