@@ -1,5 +1,5 @@
 // Code by Aabhas Senapati for the Desert Botanical Temperature Sensor Display Project, using Adafruit ESP32 S2 Feather TFT board with a adalogger feather wing, and op-amp circuits for 10 kOhm thermistors.
-// Last Edited on 19-08-25 - Added combined SD Card and Google Sheets logging with 5-minute averaging every 30 seconds, and turning of dispplay in the night.
+// Last Edited on 19-08-25 - Added combined SD Card and Google Sheets logging with 5-minute averaging every 30 seconds, and turning off dispplay in the night.
 // Github Project Page: https://github.com/aabhassenapati/temperature-display-logger.git
 
 // Data recorded on sheet: https://docs.google.com/spreadsheets/d/1vcmvVcORiZuO4vOsFyO3KGQkez6GWRYInc9CoZGzT1s/edit?usp=sharing
@@ -56,16 +56,20 @@ GFXcanvas16 canvas(240, 135);
 //Credentials used below can be found on the shared google doc: https://docs.google.com/document/d/1VEV-u6rsc7VFb_hW2kQp7uUem-LySTKIvIandwphV1Q/edit?usp=sharing
 
 // Replace with the credentials from your network
- #define WIFI_SSID ""
- #define WIFI_PASSWORD ""
+#define WIFI_SSID ""
+#define WIFI_PASSWORD ""
+
 
 // Follow steps from https://randomnerdtutorials.com/esp32-datalogging-google-sheets/#demonstration, to create and obtain credentials for Google Service Account, and fill in the required details below.
+
 
 // Google Project ID
 #define PROJECT_ID ""
 
+
 // Service Account's client email
 #define CLIENT_EMAIL ""
+
 
 // Service Account's private key
 const char PRIVATE_KEY[] PROGMEM = "";
@@ -88,16 +92,16 @@ const int MEASUREMENTS_PER_LOG = 10; // 5 minutes / 30 seconds = 10 measurements
 int measurementCount = 0;
 
 // Arrays to store individual measurements for standard deviation calculation
-double airtempMeasurements[10];
-double relhumMeasurements[10];
-double atmpresMeasurements[10];
-double planttemp1Measurements[10];
-double planttemp2Measurements[10];
-double planttemp3Measurements[10];
-double planttemp4Measurements[10];
-double planttemp5Measurements[10];
-double planttemp6Measurements[10];
-double batteryVoltageMeasurements[10];
+double airtempMeasurements[MEASUREMENTS_PER_LOG];
+double relhumMeasurements[MEASUREMENTS_PER_LOG];
+double atmpresMeasurements[MEASUREMENTS_PER_LOG];
+double planttemp1Measurements[MEASUREMENTS_PER_LOG];
+double planttemp2Measurements[MEASUREMENTS_PER_LOG];
+double planttemp3Measurements[MEASUREMENTS_PER_LOG];
+double planttemp4Measurements[MEASUREMENTS_PER_LOG];
+double planttemp5Measurements[MEASUREMENTS_PER_LOG];
+double planttemp6Measurements[MEASUREMENTS_PER_LOG];
+double batteryVoltageMeasurements[MEASUREMENTS_PER_LOG];
 
 // Sum variables for averaging (shared for both logging systems)
 double airtempSum = 0;
