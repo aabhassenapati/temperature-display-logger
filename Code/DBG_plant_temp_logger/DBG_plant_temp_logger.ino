@@ -11,7 +11,7 @@
 
 // Importing required libraries for the code, install the necesarry libraries through Tools -> Manage libraries, and searching for the names of libraries used below.
 // Add the following link under Arduino IDE -> Preferences -> Additional Boards Manager URLS: https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json
-// Then Add esp32 boards by Espressifgoing under Tools -> Boards -> Boards Manager under boards and select "Adafruit Feather ESP32-S2 TFT" as the board before verifying and uploading the code.
+// Then Add esp32 boards by Espressif going under Tools -> Boards -> Boards Manager under boards and select "Adafruit Feather ESP32-S2 TFT" as the board before verifying and uploading the code.
 
 #include <Arduino.h>
 #include <WiFi.h>
