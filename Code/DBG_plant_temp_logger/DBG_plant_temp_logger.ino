@@ -216,7 +216,6 @@ void tokenStatusCallback(TokenInfo info){
 
 // Function to initialize SD card
 bool initializeSDCard() {
-  delay(2000);
   Serial.print("Initializing SD card...");
   if (!SD.begin(SD_CS_PIN)) {
     Serial.println("SD card initialization failed!");
@@ -226,7 +225,7 @@ bool initializeSDCard() {
   }
   Serial.println("SD card initialized successfully.");
   
-
+  filename[0] = '\0';
   strcpy(filename, "/TEMPLOG00.CSV");
   for (uint8_t i = 0; i < 100; i++) {
     filename[8] = '0' + i/10;
@@ -263,7 +262,13 @@ bool logToSDCard(DateTime timestamp, double avgAirtemp, double stdAirtemp, doubl
                  double avgPlanttemp6, double stdPlanttemp6, double avgBatteryVoltage, double stdBatteryVoltage) {
   
   sdCardAvailable = SD.exists(filename);
-  if (!sdCardAvailable || !logfile) return false;
+  if (!sdCardAvailable || !logfile) {
+    sdCardAvailable = initializeSDCard();
+    if (!sdCardAvailable) {
+        return false;  // Only return false if initialization failed
+    }
+    // Continue with logging since initialization succeeded
+  }
   
   logfile.print(timestamp.unixtime());
   logfile.print(",");
@@ -603,6 +608,7 @@ void setup(){
   pinMode(A5, INPUT);
 
   // Initialize SD card with improved error handling
+    delay(4000);
   Serial.println("Attempting to initialize SD card...");
   sdCardAvailable = initializeSDCard();
   if (!sdCardAvailable) {
