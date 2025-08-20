@@ -16,7 +16,6 @@
 #include <ESP_Google_Sheet_Client.h>
 #include "Adafruit_MAX1704X.h"
 #include "Adafruit_LC709203F.h"
-#include <Adafruit_NeoPixel.h>
 #include "Adafruit_TestBed.h"
 #include <Adafruit_ST7789.h> 
 #include <Fonts/FreeSans12pt7b.h>
@@ -29,7 +28,7 @@
 //#include <GS_SDHelper.h>
 
 // SD Card pin - Updated for ESP32-S2 TFT Feather with Adalogger FeatherWing
-#define SD_CS_PIN 10  // ESP32 default CS pin for SD card
+#define SD_CS_PIN 10  // ESP32-S2 default CS pin for SD card
 
 // Instantiating objects for the required functions and libraries
 RTC_PCF8523 rtc;
@@ -115,8 +114,11 @@ double planttemp6Sum = 0;
 double batteryVoltageSum = 0;
 
 // SD Card configuration
-String dataFileName = "datalog.csv";
+File logfile;  // Keep file handle open
 bool sdCardAvailable = false;
+
+// Create unique filename 
+char filename[20];
 
 // Token Callback function
 void tokenStatusCallback(TokenInfo info);
@@ -214,33 +216,42 @@ void tokenStatusCallback(TokenInfo info){
 
 // Function to initialize SD card
 bool initializeSDCard() {
+  delay(2000);
   Serial.print("Initializing SD card...");
-  
   if (!SD.begin(SD_CS_PIN)) {
     Serial.println("SD card initialization failed!");
     Serial.print("Tried CS pin: ");
     Serial.println(SD_CS_PIN);
-    Serial.println("ESP32-S2 should use GPIO34 for CS pin with Adalogger FeatherWing");
     return false;
   }
   Serial.println("SD card initialized successfully.");
-  Serial.print("Using CS pin: ");
-  Serial.println(SD_CS_PIN);
   
-  // Check if header needs to be written
-  if (!SD.exists(dataFileName)) {
-    File dataFile = SD.open(dataFileName, FILE_WRITE);
-    if (dataFile) {
-      // Updated CSV header to include standard deviations
-      dataFile.println("Timestamp,AirTemp_C,AirTemp_StdDev,Humidity_%,Humidity_StdDev,Pressure_hPa,Pressure_StdDev,PlantTemp1_C,PlantTemp1_StdDev,PlantTemp2_C,PlantTemp2_StdDev,PlantTemp3_C,PlantTemp3_StdDev,PlantTemp4_C,PlantTemp4_StdDev,PlantTemp5_C,PlantTemp5_StdDev,PlantTemp6_C,PlantTemp6_StdDev,BatteryVoltage_V,BatteryVoltage_StdDev");
-      dataFile.close();
-      Serial.println("CSV header written to SD card with standard deviation columns.");
-    } else {
-      Serial.println("Error creating data file!");
-      return false;
+
+  strcpy(filename, "/TEMPLOG00.CSV");
+  for (uint8_t i = 0; i < 100; i++) {
+    filename[8] = '0' + i/10;
+    filename[9] = '0' + i%10;
+    // create if does not exist, do not open existing, write, sync after write
+    if (! SD.exists(filename)) {
+      break;
     }
   }
   
+  logfile = SD.open(filename, FILE_WRITE);
+  if( ! logfile ) {
+    Serial.print("Couldnt create ");
+    Serial.println(filename);
+    return false;
+  }
+  
+  Serial.print("Writing to ");
+  Serial.println(filename);
+  
+  // Write CSV header and flush immediately
+  logfile.println("Timestamp,AirTemp_C,AirTemp_StdDev,Humidity_%,Humidity_StdDev,Pressure_hPa,Pressure_StdDev,PlantTemp1_C,PlantTemp1_StdDev,PlantTemp2_C,PlantTemp2_StdDev,PlantTemp3_C,PlantTemp3_StdDev,PlantTemp4_C,PlantTemp4_StdDev,PlantTemp5_C,PlantTemp5_StdDev,PlantTemp6_C,PlantTemp6_StdDev,BatteryVoltage_V,BatteryVoltage_StdDev");
+  logfile.flush(); // Make sure header is written
+  
+  Serial.println("CSV header written to SD card with standard deviation columns.");
   return true;
 }
 
@@ -251,62 +262,55 @@ bool logToSDCard(DateTime timestamp, double avgAirtemp, double stdAirtemp, doubl
                  double avgPlanttemp4, double stdPlanttemp4, double avgPlanttemp5, double stdPlanttemp5, 
                  double avgPlanttemp6, double stdPlanttemp6, double avgBatteryVoltage, double stdBatteryVoltage) {
   
-  if (!sdCardAvailable) return false;
+  sdCardAvailable = SD.exists(filename);
+  if (!sdCardAvailable || !logfile) return false;
   
-  File dataFile = SD.open(dataFileName, FILE_WRITE);
+  logfile.print(timestamp.unixtime());
+  logfile.print(",");
+  logfile.print(avgAirtemp, 2);
+  logfile.print(",");
+  logfile.print(stdAirtemp, 3);
+  logfile.print(",");
+  logfile.print(avgRelhum, 2);
+  logfile.print(",");
+  logfile.print(stdRelhum, 3);
+  logfile.print(",");
+  logfile.print(avgAtmpres, 2);
+  logfile.print(",");
+  logfile.print(stdAtmpres, 3);
+  logfile.print(",");
+  logfile.print(avgPlanttemp1, 2);
+  logfile.print(",");
+  logfile.print(stdPlanttemp1, 3);
+  logfile.print(",");
+  logfile.print(avgPlanttemp2, 2);
+  logfile.print(",");
+  logfile.print(stdPlanttemp2, 3);
+  logfile.print(",");
+  logfile.print(avgPlanttemp3, 2);
+  logfile.print(",");
+  logfile.print(stdPlanttemp3, 3);
+  logfile.print(",");
+  logfile.print(avgPlanttemp4, 2);
+  logfile.print(",");
+  logfile.print(stdPlanttemp4, 3);
+  logfile.print(",");
+  logfile.print(avgPlanttemp5, 2);
+  logfile.print(",");
+  logfile.print(stdPlanttemp5, 3);
+  logfile.print(",");
+  logfile.print(avgPlanttemp6, 2);
+  logfile.print(",");
+  logfile.print(stdPlanttemp6, 3);
+  logfile.print(",");
+  logfile.print(avgBatteryVoltage, 3);
+  logfile.print(",");
+  logfile.println(stdBatteryVoltage, 4);
   
-  if (dataFile) {
-    // Write averaged data and standard deviations to SD card in CSV format
-    dataFile.print(timestamp.unixtime());
-    dataFile.print(",");
-    dataFile.print(avgAirtemp, 2);
-    dataFile.print(",");
-    dataFile.print(stdAirtemp, 3);
-    dataFile.print(",");
-    dataFile.print(avgRelhum, 2);
-    dataFile.print(",");
-    dataFile.print(stdRelhum, 3);
-    dataFile.print(",");
-    dataFile.print(avgAtmpres, 2);
-    dataFile.print(",");
-    dataFile.print(stdAtmpres, 3);
-    dataFile.print(",");
-    dataFile.print(avgPlanttemp1, 2);
-    dataFile.print(",");
-    dataFile.print(stdPlanttemp1, 3);
-    dataFile.print(",");
-    dataFile.print(avgPlanttemp2, 2);
-    dataFile.print(",");
-    dataFile.print(stdPlanttemp2, 3);
-    dataFile.print(",");
-    dataFile.print(avgPlanttemp3, 2);
-    dataFile.print(",");
-    dataFile.print(stdPlanttemp3, 3);
-    dataFile.print(",");
-    dataFile.print(avgPlanttemp4, 2);
-    dataFile.print(",");
-    dataFile.print(stdPlanttemp4, 3);
-    dataFile.print(",");
-    dataFile.print(avgPlanttemp5, 2);
-    dataFile.print(",");
-    dataFile.print(stdPlanttemp5, 3);
-    dataFile.print(",");
-    dataFile.print(avgPlanttemp6, 2);
-    dataFile.print(",");
-    dataFile.print(stdPlanttemp6, 3);
-    dataFile.print(",");
-    dataFile.print(avgBatteryVoltage, 3);
-    dataFile.print(",");
-    dataFile.println(stdBatteryVoltage, 4);
-    
-    dataFile.close();
-    
-    Serial.println("✓ Data logged to SD card successfully (with standard deviations)");
-    return true;
-  } else {
-    Serial.println("✗ Error opening SD card file for writing!");
-    return false;
-  }
+  logfile.flush();
+  
+  Serial.println("Data logged to SD card successfully");
+  return true;
 }
 
 // Function to convert voltage readings on a ADC channel into temperature values, by converting from voltage to resistance using opamp-circuit and corresponsing conversions, and then applying resistnace to temperature calibration to obtain temperature.
@@ -489,25 +493,24 @@ void handleCombinedLogging() {
         valueRange.add("majorDimension", "COLUMNS");
         valueRange.set("values/[0]/[0]", now.unixtime());
         valueRange.set("values/[1]/[0]", avgAirtemp);
-        valueRange.set("values/[2]/[0]", avgRelhum);
-        valueRange.set("values/[3]/[0]", avgAtmpres);
-        valueRange.set("values/[4]/[0]", avgPlanttemp1);
-        valueRange.set("values/[5]/[0]", avgPlanttemp2);
-        valueRange.set("values/[6]/[0]", avgPlanttemp3);
-        valueRange.set("values/[7]/[0]", avgPlanttemp4);
-        valueRange.set("values/[8]/[0]", avgPlanttemp5);
-        valueRange.set("values/[9]/[0]", avgPlanttemp6);
-        valueRange.set("values/[10]/[0]", avgBatteryVoltage);
-        // Add standard deviations to Google Sheets
-        valueRange.set("values/[11]/[0]", stdAirtemp);
-        valueRange.set("values/[12]/[0]", stdRelhum);
-        valueRange.set("values/[13]/[0]", stdAtmpres);
-        valueRange.set("values/[14]/[0]", stdPlanttemp1);
-        valueRange.set("values/[15]/[0]", stdPlanttemp2);
-        valueRange.set("values/[16]/[0]", stdPlanttemp3);
-        valueRange.set("values/[17]/[0]", stdPlanttemp4);
-        valueRange.set("values/[18]/[0]", stdPlanttemp5);
-        valueRange.set("values/[19]/[0]", stdPlanttemp6);
+        valueRange.set("values/[2]/[0]", stdAirtemp);
+        valueRange.set("values/[3]/[0]", avgRelhum);
+        valueRange.set("values/[4]/[0]", stdRelhum);
+        valueRange.set("values/[5]/[0]", avgAtmpres);
+        valueRange.set("values/[6]/[0]", stdAtmpres);
+        valueRange.set("values/[7]/[0]", avgPlanttemp1);
+        valueRange.set("values/[8]/[0]", stdPlanttemp1);
+        valueRange.set("values/[9]/[0]", avgPlanttemp2);
+        valueRange.set("values/[10]/[0]", stdPlanttemp2);
+        valueRange.set("values/[11]/[0]", avgPlanttemp3);
+        valueRange.set("values/[12]/[0]", stdPlanttemp3);
+        valueRange.set("values/[13]/[0]", avgPlanttemp4);
+        valueRange.set("values/[14]/[0]", stdPlanttemp4);
+        valueRange.set("values/[15]/[0]", avgPlanttemp5);
+        valueRange.set("values/[16]/[0]", stdPlanttemp5);
+        valueRange.set("values/[17]/[0]", avgPlanttemp6);
+        valueRange.set("values/[18]/[0]", stdPlanttemp6);
+        valueRange.set("values/[19]/[0]", avgBatteryVoltage);
         valueRange.set("values/[20]/[0]", stdBatteryVoltage);
 
         // Append values to Google Sheets
