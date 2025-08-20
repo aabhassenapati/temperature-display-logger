@@ -6,7 +6,7 @@
 
 // Data recorded on sheet: https://docs.google.com/spreadsheets/d/12PiDsrHu31zx2Lrlpn-d5TqE_Kz8P-uKUGBP9FFGlAk/edit?usp=sharing
 // Calibration data on sheet: https://docs.google.com/spreadsheets/d/1j9i1ZkVB2AnTspQb2jjDu-8glNMxmgINlzlttA89imA/edit?usp=sharing
-// Circuit Simulation on Falstad: https://tinyurl.com/27u8j87o
+// Circuit Simulation on Falstad: https://tinyurl.com/2afu5s2d
 
 
 // Importing required libraries for the code, install the necesarry libraries through Tools -> Manage libraries, and searching for the names of libraries used below.
