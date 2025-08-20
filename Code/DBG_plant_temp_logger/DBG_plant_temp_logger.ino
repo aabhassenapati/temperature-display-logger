@@ -1,13 +1,17 @@
 // Code by Aabhas Senapati for the Desert Botanical Temperature Sensor Display Project, using Adafruit ESP32 S2 Feather TFT board with a adalogger feather wing, and op-amp circuits for 10 kOhm thermistors.
-// Last Edited on 19-08-25 - Added combined SD Card and Google Sheets logging with 5-minute averaging every 30 seconds, and turning off dispplay in the night.
+
+// Last Edited on 20-08-25 - Added combined SD Card and Google Sheets logging with 5-minute averaging every 30 seconds, and turning off dispplay in the night, and other features.
+
 // Github Project Page: https://github.com/aabhassenapati/temperature-display-logger.git
 
-// Data recorded on sheet: https://docs.google.com/spreadsheets/d/1vcmvVcORiZuO4vOsFyO3KGQkez6GWRYInc9CoZGzT1s/edit?usp=sharing
+// Data recorded on sheet: https://docs.google.com/spreadsheets/d/12PiDsrHu31zx2Lrlpn-d5TqE_Kz8P-uKUGBP9FFGlAk/edit?usp=sharing
 // Calibration data on sheet: https://docs.google.com/spreadsheets/d/1j9i1ZkVB2AnTspQb2jjDu-8glNMxmgINlzlttA89imA/edit?usp=sharing
-// Circuit Simulation on: https://tinyurl.com/27u8j87o
+// Circuit Simulation on Falstad: https://tinyurl.com/27u8j87o
 
 
-// Importing required libraries for the code, install the necesarry libraries through Tools -> Manage libraries
+// Importing required libraries for the code, install the necesarry libraries through Tools -> Manage libraries, and searching for the names of libraries used below.
+// Add the following link under Arduino IDE -> Preferences -> Additional Boards Manager URLS: https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json
+// Then Add esp32 boards by Espressifgoing under Tools -> Boards -> Boards Manager under boards and select "Adafruit Feather ESP32-S2 TFT" as the board before verifying and uploading the code.
 
 #include <Arduino.h>
 #include <WiFi.h>
@@ -75,13 +79,15 @@ const char PRIVATE_KEY[] PROGMEM = "";
 // The ID of the spreadsheet where you'll publish the data
 const char spreadsheetId[] = "";
 
+// Update the variables below as neccessary for the use of the device
+
 // Timer variables for display
 unsigned int displaylastTime = 0;  
 unsigned int displaytimerDelay = 100; // real-display display update time .1 seconds.
 
 // Combined logging system variables
 unsigned int measurementLastTime = 0;  
-unsigned int measurementInterval = 30000; // Measure every 30 seconds
+unsigned int measurementInterval = 30000; // Measure every 30 seconds, i.e. 30000 ms
 unsigned int logLastTime = 0;  
 unsigned int logInterval = 300000; // Log every 5 minutes (300,000 ms)
 
@@ -360,6 +366,8 @@ bool shouldDisplayBeOff() {
   // Convert current time to minutes since midnight for easier comparison
   int currentTimeMinutes = currentHour * 60 + currentMinute;
   
+  // Update the two variables below to control the sleep time of the display
+
   // 7:30 PM = 19:30 = 19*60 + 30 = 1170 minutes
   // 4:30 AM = 4:30 = 4*60 + 30 = 270 minutes
   int displayOffStart = 19 * 60 + 30;  // 7:30 PM
@@ -710,6 +718,9 @@ void loop(){
       internetReConnected = false;
     }
   }
+
+  // If reconnected authenticates the google sheets setup again
+
   if(internetReConnected)
   {
     // Set the callback for Google API access token generation status (for debug only)
@@ -723,7 +734,8 @@ void loop(){
     internetReConnected = false; // Reset the flag after handling reconnection
   }
 
-  //This codechunk below looks for the sensor values every .1 seconds and updates it to the display in real-time
+  //This codechunk below looks for the sensor values every .1 seconds and updates it to the display in real-time, if the display shouldn't be in sleep mode.
+
   if ((millis() - displaylastTime > displaytimerDelay)) {
     displaylastTime = millis();
     Serial.println("**********************");
@@ -745,16 +757,8 @@ void loop(){
       canvas.setCursor(0, 25);
       canvas.setTextColor(ST77XX_RED);
       canvas.print("Air Temp: ");
-      if (bmefound) {
-        float tempReading = bme.readTemperature();
-        if (!isnan(tempReading)) {
-          canvas.print(tempReading, 1);
-        } else {
-          canvas.print("ERR");
-        }
-      } else {
-        canvas.print("N/A");
-      }
+      float tempReading = bme.readTemperature();
+      canvas.print(tempReading, 1);
       canvas.println(" °C");
       canvas.setTextColor(ST77XX_GREEN); 
       canvas.print("Plant Temp: ");
