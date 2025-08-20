@@ -29,7 +29,6 @@
 //#include <GS_SDHelper.h>
 
 // SD Card pin - Updated for ESP32-S2 TFT Feather with Adalogger FeatherWing
-// Based on ESP32 library documentation, ESP32-S2 uses GPIO34 as default CS pin
 #define SD_CS_PIN 10  // ESP32 default CS pin for SD card
 
 // Instantiating objects for the required functions and libraries
