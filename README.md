@@ -1,4 +1,5 @@
 # Temperature Display and Logger
+
 The aim of this project is to measure and display thermoregulation in different plant species through real-time measurements of Plant Temperatures, Ambient Air Temperature, and Relative Humidity, which simultaneously logs the data online and offline for research use, and displays on a real-time LCD screen for a public exhibit of the different thermoregulation strategies in different plants.
 This was developed as a project for the Desert Botanical Garden in Phoenix, Arizona, by Aabhas Senapati during the Summer of 2025, through the support of a community engagement grant from Harvey Mudd College. This repository has the code and the required schematics to document the design of this project and to be replicated by anyone willing to do so.
 
@@ -13,6 +14,9 @@ The code for plotting the logged data from Google Sheets using R can be found at
 The plots generated from R and Google Sheets in PNG format can be found at: [Plots](Plots)
 
 The images from the installation in the garden, and the project design, can be found at: [Images](Images)
+
+![IMG_2165](https://github.com/user-attachments/assets/141a8994-57e8-463f-a5e3-9565d1195dbb)
+
 
 
 
