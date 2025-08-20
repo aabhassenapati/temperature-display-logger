@@ -5,7 +5,7 @@ This was developed as a project for the Desert Botanical Garden in Phoenix, Ariz
 
 Link to the Project Document (Restricted Access to DBG): https://docs.google.com/document/d/1VEV-u6rsc7VFb_hW2kQp7uUem-LySTKIvIandwphV1Q/edit?usp=sharing
 
-The code for programming the Adafruit Feather ESP32 S2 TFT microcontroll can be found at: [Code/DBG_plant_temp_logger](Code/DBG_plant_temp_logger)
+The code for programming the Adafruit Feather ESP32 S2 TFT microcontroller, along with details like the calibration curve for thermistors, can be found at: [Code/DBG_plant_temp_logger](Code/DBG_plant_temp_logger)
 
 The fritzing schematic, dev board pinout, thermistor circuit simulation, and breadboard implementation can be found at: [Schematics](Schematics)
 
