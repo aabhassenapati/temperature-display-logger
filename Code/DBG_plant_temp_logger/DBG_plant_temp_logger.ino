@@ -318,7 +318,7 @@ bool logToSDCard(DateTime timestamp, double avgAirtemp, double stdAirtemp, doubl
   logfile.print(",");
   logfile.println(stdBatteryVoltage, 4);
   
-  logfile.flush();
+  //logfile.flush();
   
   Serial.println("Data logged to SD card successfully");
   return true;
