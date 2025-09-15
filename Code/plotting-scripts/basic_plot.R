@@ -24,5 +24,25 @@ clean_data <- raw_data |>
 
 #Plot the airtemp data to test
 clean_data |>
-  ggplot() + geom_point(aes(x=Timestamp, y=AirTemp_C))
-
+  filter(!is.na(Timestamp)) |>
+  filter(Timestamp <= as.Date("2025-08-27")) |>
+  pivot_longer(cols = c(PlantTemp1_C, PlantTemp3_C, PlantTemp5_C), 
+               names_to = "leaf_id", 
+               values_to = "temperature") |>
+  mutate(leaf_id = case_when(
+    leaf_id == "PlantTemp1_C" ~ "Leaf 1",
+    leaf_id == "PlantTemp3_C" ~ "Leaf 2", 
+    leaf_id == "PlantTemp5_C" ~ "Leaf 3"
+  )) |>
+  ggplot() + 
+  geom_line(aes(x = Timestamp, y = AirTemp_C, linetype = "Air Temperature"), 
+            color = "black", linewidth = 1) +
+  geom_point(aes(x = Timestamp, y = temperature, color = leaf_id), alpha = .5) +
+  scale_color_manual(values = c("Leaf 1" = "orange", 
+                                "Leaf 2" = "red", 
+                                "Leaf 3" = "forestgreen")) +
+  scale_linetype_manual(values = c("Air Temperature" = "solid")) +
+  labs(color = "Leaf ID",
+       linetype = "",
+       y = "Temperature (°C)",
+       x = "Timestamp")
